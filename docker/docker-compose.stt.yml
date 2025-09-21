@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  t-one-stt:
+    build:
+      context: .
+      dockerfile: Dockerfile.t-one
+    container_name: t-one-stt
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - MODEL_PATH=/models
+      - DEVICE=cpu  # Используем CPU, можно изменить на cuda для GPU
+      - LOG_LEVEL=INFO
+      - MAX_AUDIO_LENGTH=30  # Максимальная длина аудио в секундах
+      - SAMPLE_RATE=16000
+      - LANGUAGE=ru  # Русский язык по умолчанию
+    volumes:
+      - ./models:/models  # Папка для моделей
+      - ./logs:/app/logs  # Логи
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - stt-network
+
+networks:
+  stt-network:
+    driver: bridge
+
+volumes:
+  models:
+    driver: local
+  logs:
+    driver: local

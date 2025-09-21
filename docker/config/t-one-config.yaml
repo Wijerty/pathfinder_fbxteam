@@ -1,0 +1,70 @@
+# Конфигурация T-one STT сервиса
+server:
+  host: "0.0.0.0"
+  port: 8001
+  workers: 1
+  timeout: 30
+
+model:
+  # Путь к модели (будет загружена автоматически)
+  path: "/models"
+  language: "ru"
+  device: "cpu"  # cpu или cuda
+  
+  # Параметры модели
+  beam_size: 5
+  best_of: 5
+  temperature: 0.0
+  
+  # Параметры аудио
+  sample_rate: 16000
+  chunk_length: 30  # секунды
+  
+audio:
+  # Поддерживаемые форматы
+  supported_formats: ["wav", "mp3", "flac", "ogg", "m4a"]
+  
+  # Максимальный размер файла (в байтах)
+  max_file_size: 25000000  # 25MB
+  
+  # Максимальная длительность (в секундах)
+  max_duration: 300  # 5 минут
+  
+  # Автоматическое определение языка
+  auto_detect_language: false
+  
+preprocessing:
+  # Нормализация аудио
+  normalize: true
+  
+  # Удаление тишины
+  remove_silence: true
+  
+  # Фильтрация шума
+  noise_reduction: true
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "/app/logs/t-one.log"
+  max_size: "10MB"
+  backup_count: 5
+
+api:
+  # Настройки API
+  cors_enabled: true
+  cors_origins: ["*"]
+  
+  # Лимиты запросов
+  rate_limit: 100  # запросов в минуту
+  
+  # Таймауты
+  request_timeout: 30
+  
+  # Размер буфера для стриминга
+  stream_buffer_size: 1024
+
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval: 30

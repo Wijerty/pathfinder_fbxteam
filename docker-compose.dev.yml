@@ -1,0 +1,49 @@
+# Development Docker Compose для PathFinder
+version: '3.8'
+
+services:
+  # Development версия приложения
+  pathfinder-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: pathfinder-dev
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_APP_URL=http://localhost:3000
+      - NEXT_PUBLIC_MOCK_MODE=true
+      
+      # Все внешние интеграции отключены в dev режиме
+      - NEXT_PUBLIC_ENABLE_SCIBOX_LLM=false
+      - NEXT_PUBLIC_ENABLE_LOCAL_STT=false
+      - NEXT_PUBLIC_ENABLE_LOCAL_TTS=false
+      
+      # Dev конфигурация
+      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
+      
+    volumes:
+      # Монтируем код для hot reload
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    networks:
+      - pathfinder-dev-network
+    restart: unless-stopped
+    command: npm run dev
+
+  # Redis для разработки
+  redis-dev:
+    image: redis:7-alpine
+    container_name: pathfinder-redis-dev
+    ports:
+      - "6380:6379"
+    networks:
+      - pathfinder-dev-network
+    restart: unless-stopped
+
+networks:
+  pathfinder-dev-network:
+    driver: bridge

@@ -1,0 +1,182 @@
+# Docker Compose для PathFinder AI HR System
+version: '3.8'
+
+services:
+  # Основное приложение PathFinder
+  pathfinder-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pathfinder-app
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_APP_URL=http://localhost:3000
+      
+      # Feature flags (все отключены по умолчанию для безопасности)
+      - NEXT_PUBLIC_ENABLE_SCIBOX_LLM=false
+      - NEXT_PUBLIC_ENABLE_LOCAL_STT=false
+      - NEXT_PUBLIC_ENABLE_LOCAL_TTS=false
+      - NEXT_PUBLIC_ENABLE_HRIS_IMPORT=false
+      - NEXT_PUBLIC_ENABLE_LMS_IMPORT=false
+      - NEXT_PUBLIC_ENABLE_ATS_IMPORT=false
+      
+      # Mock режим включен
+      - NEXT_PUBLIC_MOCK_MODE=true
+      
+      # URL сервисов (для будущей интеграции)
+      - SCIBOX_API_URL=http://scibox-llm:8000
+      - LOCAL_STT_API_URL=http://local-stt:8001
+      - LOCAL_TTS_API_URL=http://local-tts:8002
+      
+      # Безопасность
+      - JWT_SECRET=your-super-secret-jwt-key-change-in-production
+      - ENABLE_AUDIT_LOGGING=true
+      
+    networks:
+      - pathfinder-network
+    restart: unless-stopped
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Redis для кеширования и сессий
+  redis:
+    image: redis:7-alpine
+    container_name: pathfinder-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass pathfinder-redis-password
+    volumes:
+      - redis_data:/data
+    networks:
+      - pathfinder-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "pathfinder-redis-password", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Mock Scibox LLM сервис (для демонстрации архитектуры)
+  scibox-llm:
+    image: nginx:alpine
+    container_name: pathfinder-scibox-mock
+    ports:
+      - "8000:80"
+    volumes:
+      - ./docker/scibox-mock.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - pathfinder-network
+    restart: unless-stopped
+    profiles:
+      - mock-services
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Mock STT сервис (для демонстрации архитектуры)
+  local-stt:
+    image: nginx:alpine
+    container_name: pathfinder-stt-mock
+    ports:
+      - "8001:80"
+    volumes:
+      - ./docker/stt-mock.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - pathfinder-network
+    restart: unless-stopped
+    profiles:
+      - mock-services
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Mock TTS сервис (для демонстрации архитектуры)
+  local-tts:
+    image: nginx:alpine
+    container_name: pathfinder-tts-mock
+    ports:
+      - "8002:80"
+    volumes:
+      - ./docker/tts-mock.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - pathfinder-network
+    restart: unless-stopped
+    profiles:
+      - mock-services
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # PostgreSQL (для production развертывания)
+  postgres:
+    image: postgres:15-alpine
+    container_name: pathfinder-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=pathfinder
+      - POSTGRES_USER=pathfinder
+      - POSTGRES_PASSWORD=pathfinder-db-password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - pathfinder-network
+    restart: unless-stopped
+    profiles:
+      - production
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pathfinder -d pathfinder"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Nginx reverse proxy (для production)
+  nginx:
+    image: nginx:alpine
+    container_name: pathfinder-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/ssl:/etc/nginx/ssl:ro
+    networks:
+      - pathfinder-network
+    restart: unless-stopped
+    depends_on:
+      - pathfinder-app
+    profiles:
+      - production
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+# Volumes
+volumes:
+  redis_data:
+    driver: local
+  postgres_data:
+    driver: local
+
+# Networks
+networks:
+  pathfinder-network:
+    driver: bridge
+    name: pathfinder-network

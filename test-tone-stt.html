@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тест T-one STT</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        .recording {
+            background-color: #ff4444;
+            color: white;
+        }
+        .logs {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        .result {
+            background-color: #e8f5e8;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+            border-left: 4px solid #4CAF50;
+        }
+    </style>
+</head>
+<body>
+    <h1>Тест T-one STT WebSocket API</h1>
+    
+    <div class="controls">
+        <button id="startBtn">Начать запись</button>
+        <button id="stopBtn" disabled>Остановить запись</button>
+        <button id="clearBtn">Очистить логи</button>
+    </div>
+    
+    <div class="result">
+        <h3>Результат распознавания:</h3>
+        <div id="transcription">Нажмите "Начать запись" и произнесите что-нибудь...</div>
+    </div>
+    
+    <div class="logs" id="logs"></div>
+
+    <script>
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const transcriptionDiv = document.getElementById('transcription');
+        const logsDiv = document.getElementById('logs');
+        
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let ws = null;
+        
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            logsDiv.textContent += `[${timestamp}] ${message}\n`;
+            logsDiv.scrollTop = logsDiv.scrollHeight;
+        }
+        
+        async function startRecording() {
+            try {
+                log('Запрашиваем доступ к микрофону...');
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: {
+                        sampleRate: 16000,
+                        channelCount: 1,
+                        echoCancellation: true,
+                        noiseSuppression: true
+                    } 
+                });
+                
+                log('Доступ к микрофону получен');
+                
+                mediaRecorder = new MediaRecorder(stream, {
+                    mimeType: 'audio/webm;codecs=opus'
+                });
+                
+                audioChunks = [];
+                
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        audioChunks.push(event.data);
+                        log(`Получен аудио чанк: ${event.data.size} байт`);
+                    }
+                };
+                
+                mediaRecorder.onstop = async () => {
+                    log('Запись остановлена, обрабатываем аудио...');
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    await processAudio(audioBlob);
+                    
+                    // Останавливаем все треки
+                    stream.getTracks().forEach(track => track.stop());
+                };
+                
+                mediaRecorder.start(1000); // Записываем чанками по 1 секунде
+                log('Запись началась...');
+                
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                startBtn.textContent = 'Идет запись...';
+                startBtn.classList.add('recording');
+                
+            } catch (error) {
+                log(`Ошибка доступа к микрофону: ${error.message}`);
+            }
+        }
+        
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+                log('Останавливаем запись...');
+            }
+            
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            startBtn.textContent = 'Начать запись';
+            startBtn.classList.remove('recording');
+        }
+        
+        async function processAudio(audioBlob) {
+            try {
+                log(`Конвертируем аудио (${audioBlob.size} байт) для T-one...`);
+                
+                // Конвертируем в PCM 16-bit 16kHz
+                const audioBuffer = await convertAudioForTone(audioBlob);
+                log(`Аудио сконвертировано в PCM: ${audioBuffer.byteLength} байт`);
+                
+                // Отправляем в T-one через WebSocket
+                await sendToTone(audioBuffer);
+                
+            } catch (error) {
+                log(`Ошибка обработки аудио: ${error.message}`);
+            }
+        }
+        
+        async function convertAudioForTone(audioBlob) {
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const arrayBuffer = await audioBlob.arrayBuffer();
+            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+            
+            // Конвертируем в моно 16kHz
+            const targetSampleRate = 16000;
+            const numberOfChannels = 1;
+            
+            const offlineContext = new OfflineAudioContext(
+                numberOfChannels,
+                audioBuffer.duration * targetSampleRate,
+                targetSampleRate
+            );
+            
+            const source = offlineContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(offlineContext.destination);
+            source.start();
+            
+            const renderedBuffer = await offlineContext.startRendering();
+            
+            // Конвертируем в PCM 16-bit
+            const length = renderedBuffer.length;
+            const pcmBuffer = new ArrayBuffer(length * 2);
+            const view = new DataView(pcmBuffer);
+            
+            const channelData = renderedBuffer.getChannelData(0);
+            for (let i = 0; i < length; i++) {
+                const sample = Math.max(-1, Math.min(1, channelData[i]));
+                view.setInt16(i * 2, sample * 0x7FFF, true);
+            }
+            
+            await audioContext.close();
+            return pcmBuffer;
+        }
+        
+        async function sendToTone(audioBuffer) {
+            return new Promise((resolve, reject) => {
+                const wsUrl = 'ws://localhost:8080/api/ws';
+                log(`Подключаемся к T-one WebSocket: ${wsUrl}`);
+                
+                ws = new WebSocket(wsUrl);
+                let transcriptionResult = '';
+                
+                const timeout = setTimeout(() => {
+                    ws.close();
+                    reject(new Error('Таймаут подключения к T-one'));
+                }, 30000);
+                
+                ws.onopen = () => {
+                    log('WebSocket подключение установлено');
+                    
+                    // Отправляем аудио данные чанками
+                    const chunkSize = 4096;
+                    const uint8Array = new Uint8Array(audioBuffer);
+                    
+                    log(`Отправляем аудио данные (${uint8Array.length} байт) чанками по ${chunkSize} байт`);
+                    
+                    for (let i = 0; i < uint8Array.length; i += chunkSize) {
+                        const chunk = uint8Array.slice(i, i + chunkSize);
+                        ws.send(chunk);
+                        log(`Отправлен чанк ${i / chunkSize + 1}: ${chunk.length} байт`);
+                    }
+                    
+                    log('Все аудио данные отправлены, закрываем соединение');
+                    ws.close();
+                };
+                
+                ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        log(`Получено сообщение от T-one: ${JSON.stringify(data)}`);
+                        
+                        if (data.event === 'transcript' && data.phrase && data.phrase.text) {
+                            transcriptionResult += data.phrase.text + ' ';
+                            log(`Получена транскрипция: "${data.phrase.text}"`);
+                        }
+                    } catch (error) {
+                        log(`Ошибка парсинга сообщения: ${error.message}`);
+                    }
+                };
+                
+                ws.onclose = () => {
+                    clearTimeout(timeout);
+                    log('WebSocket соединение закрыто');
+                    
+                    if (transcriptionResult.trim()) {
+                        transcriptionDiv.textContent = transcriptionResult.trim();
+                        log(`Итоговая транскрипция: "${transcriptionResult.trim()}"`);
+                        resolve(transcriptionResult.trim());
+                    } else {
+                        transcriptionDiv.textContent = 'Транскрипция не получена';
+                        log('Транскрипция не получена от T-one');
+                        resolve('');
+                    }
+                };
+                
+                ws.onerror = (error) => {
+                    clearTimeout(timeout);
+                    log(`Ошибка WebSocket: ${error}`);
+                    reject(new Error(`Ошибка WebSocket подключения к T-one`));
+                };
+            });
+        }
+        
+        function clearLogs() {
+            logsDiv.textContent = '';
+            transcriptionDiv.textContent = 'Нажмите "Начать запись" и произнесите что-нибудь...';
+        }
+        
+        startBtn.addEventListener('click', startRecording);
+        stopBtn.addEventListener('click', stopRecording);
+        clearBtn.addEventListener('click', clearLogs);
+        
+        log('Тест T-one STT готов к использованию');
+    </script>
+</body>
+</html>

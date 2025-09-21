@@ -1,0 +1,12 @@
+FROM tinkoffcreditsystems/t-one:0.1.0
+
+# Установка переменных окружения
+ENV PORT=8080
+ENV LOG_LEVEL=INFO
+
+# Открытие порта
+EXPOSE 8080
+
+# Проверка здоровья
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8080/ || exit 1

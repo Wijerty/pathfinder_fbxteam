@@ -1,0 +1,17 @@
+# Development Dockerfile для PathFinder
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Устанавливаем зависимости
+COPY package.json package-lock.json* ./
+RUN npm ci
+
+# Копируем исходный код
+COPY . .
+
+# Открываем порт для development сервера
+EXPOSE 3000
+
+# Запускаем development сервер
+CMD ["npm", "run", "dev"]

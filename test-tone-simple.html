@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>T-one STT Simple Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        button { padding: 10px 20px; margin: 10px; font-size: 16px; }
+        #logs { background: #f0f0f0; padding: 10px; margin: 10px 0; height: 400px; overflow-y: scroll; }
+    </style>
+</head>
+<body>
+    <h1>T-one STT Simple Test</h1>
+    <button onclick="testConnection()">Test Connection</button>
+    <button onclick="clearLogs()">Clear Logs</button>
+    <div id="logs"></div>
+
+    <script>
+        function log(message) {
+            const logs = document.getElementById('logs');
+            logs.innerHTML += new Date().toLocaleTimeString() + ': ' + message + '\n';
+            logs.scrollTop = logs.scrollHeight;
+        }
+
+        function testConnection() {
+            log('Начинаем тест подключения к T-one...');
+            
+            const ws = new WebSocket('ws://localhost:8080/api/ws');
+            
+            ws.onopen = function(event) {
+                log('WebSocket подключен успешно!');
+                
+                // Создаем простые тестовые PCM данные (тишина)
+                const sampleRate = 16000;
+                const duration = 1; // 1 секунда
+                const samples = sampleRate * duration;
+                const buffer = new ArrayBuffer(samples * 2); // 16-bit = 2 bytes per sample
+                const view = new Int16Array(buffer);
+                
+                // Заполняем тишиной (нули)
+                for (let i = 0; i < samples; i++) {
+                    view[i] = 0;
+                }
+                
+                log(`Отправляем тестовые PCM данные: ${buffer.byteLength} байт`);
+                ws.send(buffer);
+                
+                // Закрываем соединение через небольшую задержку
+                setTimeout(() => {
+                    log('Закрываем соединение...');
+                    ws.close();
+                }, 1000);
+            };
+            
+            ws.onmessage = function(event) {
+                log('Получено сообщение: ' + event.data);
+                log('Тип данных: ' + typeof event.data);
+            };
+            
+            ws.onclose = function(event) {
+                log(`WebSocket закрыт. Код: ${event.code}, Причина: ${event.reason}`);
+            };
+            
+            ws.onerror = function(error) {
+                log('Ошибка WebSocket: ' + error);
+            };
+        }
+
+        function clearLogs() {
+            document.getElementById('logs').innerHTML = '';
+        }
+    </script>
+</body>
+</html>
